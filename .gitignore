@@ -1,0 +1,4 @@
+*.o
+adaptiveNoise
+.vscode/
+*.wav
