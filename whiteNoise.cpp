@@ -156,35 +156,40 @@ void audioThread(SharedData* shared, AncMixing* mixer) {
             continue;
         }
 
-        float rms = computeRMS(buffer, BUFFER_FRAMES * CHANNELS);
+        // float rms = computeRMS(buffer, BUFFER_FRAMES * CHANNELS);
         
-        // Get current sensor data with mutex protection
-        uint8_t attention, meditation;
-        float bpm;
-        float spo2;
-        float mix_level;
+        // // Get current sensor data with mutex protection
+        // uint8_t attention, meditation;
+        // float bpm;
+        // float spo2;
+        // float mix_level;
         
-        {
-            std::lock_guard<std::mutex> lock(shared->dataMutex);
-            attention = shared->attention;
-            meditation = shared->meditation;
-            bpm = shared->bpm;
-            spo2 = shared->spo2;
+        // {
+        //     std::lock_guard<std::mutex> lock(shared->dataMutex);
+        //     attention = shared->attention;
+        //     meditation = shared->meditation;
+        //     bpm = shared->bpm;
+        //     spo2 = shared->spo2;
             
-            // Update the mixer with current values
-            mix_level = mixer->update(0, 0, bpm, spo2, rms);
-            std::cout << "Mix Level: " << mix_level << std::endl;
-            std::cout << "BPM: " << bpm << std::endl;
-            std::cout << "SPO2: " << spo2 << std::endl;
-            std::cout << "RMS: " << rms << std::endl;
+        //     // Update the mixer with current values
+        //     mix_level = mixer->update(0, 0, bpm, spo2, rms);
+        //     std::cout << "Mix Level: " << mix_level << std::endl;
+        //     std::cout << "BPM: " << bpm << std::endl;
+        //     std::cout << "SPO2: " << spo2 << std::endl;
+        //     std::cout << "RMS: " << rms << std::endl;
             
-            // Save back to shared data
-            shared->rms = rms;
-            shared->mix_level = mix_level;
-        }
+        //     // Save back to shared data
+        //     shared->rms = rms;
+        //     shared->mix_level = mix_level;
+        // }
         
         // Generate white noise with the current mix level
-        generateWhiteNoise(noise_buffer, BUFFER_FRAMES * CHANNELS, mix_level);
+        // generateWhiteNoise(noise_buffer, BUFFER_FRAMES * CHANNELS, mix_level);
+
+        for (int i = 0; i < BUFFER_FRAMES * CHANNELS; i++) {
+            int val = buffer[i] << 3;
+            buffer[i] = std::max(std::min(val, (int32_t)INT16_MAX), (int32_t)INT16_MIN);
+        }
 
         // Write to playback
         err = snd_pcm_writei(playback_handle, buffer, BUFFER_FRAMES);
