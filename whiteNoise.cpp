@@ -6,11 +6,15 @@
 #include <mutex>
 #include <atomic>
 #include <chrono>
+#include <array>
 #include "whiteNoise.h"
 #include "oled.h"
 #include "i2c_manager.h"
 #include "EEG.h"
 #include "rec_uart.h"
+#include "constants.h"
+#include "capture.h"
+#include "playback.h"
 
 #define SAMPLE_RATE 48000
 #define CHANNELS 2
@@ -90,122 +94,51 @@ void sensorDisplayThread(SharedData* shared, EEGSerial* eeg, RecUart* recUart) {
 }
 
 void audioThread(SharedData* shared, AncMixing* mixer) {
-    snd_pcm_t *capture_handle, *playback_handle;
-    snd_pcm_hw_params_t *hw_params;
-    int err;
+    unsigned int play_freq = 48000;
+    unsigned int number_of_channels = NR_OF_CHANNELS;
+    snd_pcm_uframes_t frames_per_period = FRAMES_PER_PERIOD;
+    snd_pcm_uframes_t frames_per_device_buffer = PERIODS_PER_BUFFER * FRAMES_PER_PERIOD;
 
-    // Open I2S capture device
-    if ((err = snd_pcm_open(&capture_handle, "hw:3,1", SND_PCM_STREAM_CAPTURE, 0)) < 0) {
-        fprintf(stderr, "Cannot open input audio device: %s\n", snd_strerror(err));
-        shared->running = false;
-        return;
-    }
+    snd_pcm_t *cap_handle;
+    init_capture(&cap_handle, &play_freq, &frames_per_period, &frames_per_device_buffer, NR_OF_CHANNELS, "hw:3,1");
 
-    // Open default playback device
-    if ((err = snd_pcm_open(&playback_handle, "default", SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
-        fprintf(stderr, "Cannot open output audio device: %s\n", snd_strerror(err));
-        snd_pcm_close(capture_handle);
-        shared->running = false;
-        return;
-    }
+    snd_pcm_t *play_handle;
+    init_playback(&play_handle, &play_freq, &frames_per_period, &frames_per_device_buffer, NR_OF_CHANNELS, "default");
 
-    // Configure capture device with larger buffer
-    snd_pcm_hw_params_malloc(&hw_params);
-    snd_pcm_hw_params_any(capture_handle, hw_params);
-    snd_pcm_hw_params_set_access(capture_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
-    snd_pcm_hw_params_set_format(capture_handle, hw_params, SND_PCM_FORMAT_S16_LE);
-    snd_pcm_hw_params_set_rate(capture_handle, hw_params, SAMPLE_RATE, 0);
-    snd_pcm_hw_params_set_channels(capture_handle, hw_params, CHANNELS);
-    snd_pcm_hw_params_set_buffer_size(capture_handle, hw_params, BUFFER_FRAMES * 4); // Larger buffer
-    snd_pcm_hw_params_set_period_size(capture_handle, hw_params, BUFFER_FRAMES, 0);
-    snd_pcm_hw_params(capture_handle, hw_params);
-
-    // Configure playback device with larger buffer to prevent underruns
-    snd_pcm_hw_params_any(playback_handle, hw_params);
-    snd_pcm_hw_params_set_access(playback_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
-    snd_pcm_hw_params_set_format(playback_handle, hw_params, SND_PCM_FORMAT_S16_LE);
-    snd_pcm_hw_params_set_rate(playback_handle, hw_params, SAMPLE_RATE, 0);
-    snd_pcm_hw_params_set_channels(playback_handle, hw_params, CHANNELS);
-    snd_pcm_hw_params_set_buffer_size(playback_handle, hw_params, BUFFER_FRAMES * 4); // Larger buffer
-    snd_pcm_hw_params_set_period_size(playback_handle, hw_params, BUFFER_FRAMES, 0);
-    snd_pcm_hw_params(playback_handle, hw_params);
-
-    snd_pcm_hw_params_free(hw_params);
-    snd_pcm_prepare(capture_handle);
-    snd_pcm_prepare(playback_handle);
-    
-    int16_t buffer[BUFFER_FRAMES * CHANNELS];
-    int16_t noise_buffer[BUFFER_FRAMES * CHANNELS];
-
-    // Set higher priority for audio thread if possible
-    struct sched_param param;
-    param.sched_priority = sched_get_priority_max(SCHED_FIFO);
-    if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) != 0) {
-        // Fall back to normal priority if SCHED_FIFO not available
-        nice(-10); // Try to give this thread a higher priority
-    }
+    std::array<fixed_sample_type, BUFFER_SAMPLE_SIZE> capture_buffer = {0};
+    std::array<fixed_sample_type, BUFFER_SAMPLE_SIZE> playback_buffer = {0};
 
     while (shared->running) {
-        // Read audio
-        memset(buffer, 0, sizeof(buffer));        
-        err = snd_pcm_readi(capture_handle, buffer, BUFFER_FRAMES);
+        // Create threads for capture, processing, and playback
+        std::thread capture_thread([&] {
+            capture(cap_handle, capture_buffer.data(), FRAMES_PER_PERIOD);
 
-        if (err < 0) {
-            fprintf(stderr, "Read error: %s\n", snd_strerror(err));
-            snd_pcm_prepare(capture_handle);
-            continue;
-        }
+            const fixed_sample_type multiplier = 8;
+            std::transform(capture_buffer.begin(), capture_buffer.end(), capture_buffer.begin(),
+                   [multiplier](fixed_sample_type& val) { 
+                    fixed_sample_type retval = multiplier * val;
+                        if(retval > std::numeric_limits<fixed_sample_type>::max())
+                            return std::numeric_limits<fixed_sample_type>::max();
+                        if(retval < std::numeric_limits<fixed_sample_type>::min()) 
+                            return std::numeric_limits<fixed_sample_type>::min();
+                        return retval;
+                    });
+        });
 
-        // float rms = computeRMS(buffer, BUFFER_FRAMES * CHANNELS);
-        
-        // // Get current sensor data with mutex protection
-        // uint8_t attention, meditation;
-        // float bpm;
-        // float spo2;
-        // float mix_level;
-        
-        // {
-        //     std::lock_guard<std::mutex> lock(shared->dataMutex);
-        //     attention = shared->attention;
-        //     meditation = shared->meditation;
-        //     bpm = shared->bpm;
-        //     spo2 = shared->spo2;
-            
-        //     // Update the mixer with current values
-        //     mix_level = mixer->update(0, 0, bpm, spo2, rms);
-        //     std::cout << "Mix Level: " << mix_level << std::endl;
-        //     std::cout << "BPM: " << bpm << std::endl;
-        //     std::cout << "SPO2: " << spo2 << std::endl;
-        //     std::cout << "RMS: " << rms << std::endl;
-            
-        //     // Save back to shared data
-        //     shared->rms = rms;
-        //     shared->mix_level = mix_level;
-        // }
-        
-        // Generate white noise with the current mix level
-        // generateWhiteNoise(noise_buffer, BUFFER_FRAMES * CHANNELS, mix_level);
+        std::thread playback_thread([&] {
+            playback(play_handle, playback_buffer.data(), FRAMES_PER_PERIOD);
+        });
 
-        for (int i = 0; i < BUFFER_FRAMES * CHANNELS; i++) {
-            int val = buffer[i] << 3;
-            buffer[i] = std::max(std::min(val, (int32_t)INT16_MAX), (int32_t)INT16_MIN);
-        }
+        // Wait for all threads to complete
+        capture_thread.join();
+        playback_thread.join();
 
-        // Write to playback
-        err = snd_pcm_writei(playback_handle, buffer, BUFFER_FRAMES);
-        if (err < 0) {
-            if (err == -EPIPE) {
-                fprintf(stderr, "Underrun detected! Recovering...\n");
-                snd_pcm_prepare(playback_handle);  // Recover from buffer underrun
-            } else {
-                fprintf(stderr, "Write error: %s\n", snd_strerror(err));
-                snd_pcm_prepare(playback_handle);
-            }
-        }
+        // Exchange data between buffers (must be done after all threads complete)
+        std::copy(capture_buffer.begin(), capture_buffer.end(), playback_buffer.begin());
     }
-
-    snd_pcm_close(capture_handle);
-    snd_pcm_close(playback_handle);
+    
+    snd_pcm_drain(play_handle);
+    snd_pcm_close(play_handle);
 }
 
 void playWhiteNoise(AncMixing& mixer) {
@@ -217,13 +150,10 @@ void playWhiteNoise(AncMixing& mixer) {
     RecUart recUart;
     
     // Create threads
-    std::thread display_thread(sensorDisplayThread, &shared, &eeg, &recUart);
     std::thread audio_thread(audioThread, &shared, &mixer);
-    
-    // Set main thread to lower priority
-    nice(10);
+
+    sensorDisplayThread(&shared, &eeg, &recUart);
     
     // Wait for threads to finish (use Ctrl+C to exit)
     if (audio_thread.joinable()) audio_thread.join();
-    if (display_thread.joinable()) display_thread.join();
 }
