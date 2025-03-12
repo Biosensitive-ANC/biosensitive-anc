@@ -6,11 +6,7 @@
 #include <vector>
 #include "ancMixing.h"
 
-void playWhiteNoise(AncMixing& mixer);
-
-// Function prototype for computeRMS
-float computeRMS(const int16_t* buffer, int size);
-
-void applyGain(int16_t *buffer, size_t samples, float gain);
+void sensorDisplayThread(SharedData* shared, EEGSerial* eeg, RecUart* recUart);
+void audioThread(SharedData* shared, AncMixing* mixer);
 
 #endif // WHITE_NOISE_H

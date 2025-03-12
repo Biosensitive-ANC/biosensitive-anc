@@ -15,24 +15,8 @@
 #include "constants.h"
 #include "capture.h"
 #include "playback.h"
+#include "common.h"
 
-#define SAMPLE_RATE 48000
-#define CHANNELS 2
-#define FRAME_SIZE (CHANNELS * sizeof(int16_t))
-#define BUFFER_FRAMES 1024
-#define OLED_UPDATE_MS 1000 // Update OLED every 250ms seems to be okay
-
-// Shared data between threads
-struct SharedData {
-    std::mutex dataMutex;
-    uint8_t attention = 0;
-    uint8_t meditation = 0;
-    float bpm = 0.0f;
-    float spo2 = 0.0f;
-    float rms = 0.0f;
-    float mix_level = 0.0f;
-    std::atomic<bool> running{true};
-};
 
 // Compute RMS value of the captured audio buffer
 float computeRMS(const int16_t* buffer, int size) {
@@ -94,66 +78,58 @@ void sensorDisplayThread(SharedData* shared, EEGSerial* eeg, RecUart* recUart) {
 }
 
 void audioThread(SharedData* shared, AncMixing* mixer) {
-    unsigned int play_freq = 48000;
-    unsigned int number_of_channels = NR_OF_CHANNELS;
     snd_pcm_uframes_t frames_per_period = FRAMES_PER_PERIOD;
     snd_pcm_uframes_t frames_per_device_buffer = PERIODS_PER_BUFFER * FRAMES_PER_PERIOD;
 
     snd_pcm_t *cap_handle;
-    init_capture(&cap_handle, &play_freq, &frames_per_period, &frames_per_device_buffer, NR_OF_CHANNELS, "hw:3,1");
+    init_capture(&cap_handle, PLAY_FREQ, &frames_per_period, &frames_per_device_buffer, NR_OF_CHANNELS, "hw:3,1");
 
     snd_pcm_t *play_handle;
-    init_playback(&play_handle, &play_freq, &frames_per_period, &frames_per_device_buffer, NR_OF_CHANNELS, "default");
+    init_playback(&play_handle, PLAY_FREQ, &frames_per_period, &frames_per_device_buffer, NR_OF_CHANNELS, "default");
 
     std::array<fixed_sample_type, BUFFER_SAMPLE_SIZE> capture_buffer = {0};
+    std::array<fixed_sample_type, BUFFER_SAMPLE_SIZE> process_buffer = {0};
     std::array<fixed_sample_type, BUFFER_SAMPLE_SIZE> playback_buffer = {0};
 
     while (shared->running) {
         // Create threads for capture, processing, and playback
         std::thread capture_thread([&] {
             capture(cap_handle, capture_buffer.data(), FRAMES_PER_PERIOD);
-
-            const fixed_sample_type multiplier = 8;
-            std::transform(capture_buffer.begin(), capture_buffer.end(), capture_buffer.begin(),
-                   [multiplier](fixed_sample_type& val) { 
-                    fixed_sample_type retval = multiplier * val;
-                        if(retval > std::numeric_limits<fixed_sample_type>::max())
-                            return std::numeric_limits<fixed_sample_type>::max();
-                        if(retval < std::numeric_limits<fixed_sample_type>::min()) 
-                            return std::numeric_limits<fixed_sample_type>::min();
-                        return retval;
-                    });
         });
-
+        
+        // playback might not need its own thread , not sure if it is blocking
+        // look at is block transfer = ??? in runtime
         std::thread playback_thread([&] {
             playback(play_handle, playback_buffer.data(), FRAMES_PER_PERIOD);
         });
+
+        shared->rms = computeRMS(capture_buffer.data(), BUFFER_SAMPLE_SIZE);
+        
+        #ifdef WHITE_NOISE_IMPLEMENTATION
+        generateWhiteNoise(process_buffer.data(), BUFFER_SAMPLE_SIZE, shared->mix_level); // idk if the mix level will update properly
+        #else
+        const fixed_sample_type multiplier = 8;
+        const MAXVAL = std::numeric_limits<fixed_sample_type>::max() / 8
+        const MINVAL = std::numeric_limits<fixed_sample_type>::min() / 8
+        std::transform(process_buffer.begin(), process_buffer.end(), process_buffer.begin(),
+                [multiplier](fixed_sample_type& val) { 
+                    if(val > MAXVAL)
+                        return std::numeric_limits<fixed_sample_type>::max();
+                    if(val < MINVAL) 
+                        return std::numeric_limits<fixed_sample_type>::min();
+                    return multiplier * val;
+                });
+        #endif
 
         // Wait for all threads to complete
         capture_thread.join();
         playback_thread.join();
 
         // Exchange data between buffers (must be done after all threads complete)
-        std::copy(capture_buffer.begin(), capture_buffer.end(), playback_buffer.begin());
+        std::copy(capture_buffer.begin(), capture_buffer.end(), process_buffer.begin());
+        std::copy(process_buffer.begin(), process_buffer.end(), playback_buffer.begin());
     }
     
     snd_pcm_drain(play_handle);
     snd_pcm_close(play_handle);
-}
-
-void playWhiteNoise(AncMixing& mixer) {
-    // Initialize shared data structure
-    SharedData shared;
-    
-    // Initialize sensors
-    EEGSerial eeg;
-    RecUart recUart;
-    
-    // Create threads
-    std::thread audio_thread(audioThread, &shared, &mixer);
-
-    sensorDisplayThread(&shared, &eeg, &recUart);
-    
-    // Wait for threads to finish (use Ctrl+C to exit)
-    if (audio_thread.joinable()) audio_thread.join();
 }
