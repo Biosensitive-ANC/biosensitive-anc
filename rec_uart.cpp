@@ -55,18 +55,21 @@ void RecUart::listen()
         }
 
         // Update data (with mutex lock)
-        std::lock_guard<std::mutex> lock(data_mutex);
+
+        // std::lock_guard<std::mutex> lock(data_mutex);
         bpm = buffer[0];
         spo2_percent = 90.0f + (buffer[1] * 10.0f / 255.0f);
     }
+
+    std::cout << "REC ENDED" << std::endl;
 }
 
 // Get heart rate and SpO2 (thread-safe)
-void RecUart::getData(uint8_t& out_bpm, float& out_spo2)
+void RecUart::getData(uint8_t* out_bpm, float* out_spo2)
 {
-    std::lock_guard<std::mutex> lock(data_mutex);
-    out_bpm = bpm;
-    out_spo2 = spo2_percent;
+    // std::lock_guard<std::mutex> lock(data_mutex);
+    *out_bpm = bpm;
+    *out_spo2 = spo2_percent;
 }
 
 // Destructor (close serial port & thread)

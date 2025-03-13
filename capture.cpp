@@ -6,7 +6,7 @@
 #include "capture.h"
 #include <iostream>
 
-void init_capture(snd_pcm_t **cap_handle, unsigned int *cap_freq, snd_pcm_uframes_t *cap_period_size,
+void init_capture(snd_pcm_t **cap_handle, unsigned int cap_freq, snd_pcm_uframes_t *cap_period_size,
                   snd_pcm_uframes_t *cap_buffer_size, unsigned int number_of_channels,
                   const std::string capture_device_name) {
 
@@ -47,8 +47,9 @@ void init_capture(snd_pcm_t **cap_handle, unsigned int *cap_freq, snd_pcm_uframe
 
     /* 44100 bits/second sampling rate (CD quality) */
 
+    unsigned int cap_freq_ptr = cap_freq;
     snd_pcm_hw_params_set_rate_near(*cap_handle, params,
-                                    cap_freq, &dir);
+        &cap_freq_ptr, &dir);
 
 //    snd_pcm_hw_params_set_buffer_size_near (cap_handle, params, &frames);
     snd_pcm_uframes_t min_period_size_to_set = 2;
@@ -65,10 +66,10 @@ void init_capture(snd_pcm_t **cap_handle, unsigned int *cap_freq, snd_pcm_uframe
         exit(1);
     }
 
-    snd_pcm_hw_params_get_rate(params, cap_freq, &dir);
+    snd_pcm_hw_params_get_rate(params, &cap_freq_ptr, &dir);
     snd_pcm_hw_params_get_period_size(params, cap_period_size, &dir);
 
-    std::cerr << "Capture params: " << "Capture rate: " << *cap_freq << " Period size: " << *cap_period_size
+    std::cerr << "Capture params: " << "Capture rate: " << cap_freq_ptr << " Period size: " << *cap_period_size
               << " Min period size: " << min_period_size_to_set << std::endl;
 
     if (*cap_period_size != FRAMES_PER_PERIOD) {

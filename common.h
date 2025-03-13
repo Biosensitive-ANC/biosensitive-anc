@@ -1,3 +1,6 @@
+#include <mutex>
+#include <atomic>
+
 #ifndef COMMON_H
 #define COMMON_H
 

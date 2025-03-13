@@ -14,7 +14,7 @@
 #include "constants.h"
 
 
-void init_capture(snd_pcm_t **cap_handle, unsigned int *cap_freq, snd_pcm_uframes_t *cap_period_size,
+void init_capture(snd_pcm_t **cap_handle, unsigned int cap_freq, snd_pcm_uframes_t *cap_period_size,
                   snd_pcm_uframes_t *cap_buffer_size, unsigned int number_of_channels,
                   const std::string capture_device_name);
 

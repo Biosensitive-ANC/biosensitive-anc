@@ -6,7 +6,7 @@
 #ifndef RPIANC_CONSTANTS_H
 #define RPIANC_CONSTANTS_H
 
-//#define WHITE_NOISE_IMPLEMENTATION
+// #define WHITE_NOISE_IMPLEMENTATION
 
 typedef float sample_type;
 typedef int32_t fixed_sample_type;

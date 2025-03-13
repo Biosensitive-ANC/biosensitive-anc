@@ -14,7 +14,7 @@
 #include "constants.h"
 
 
-void init_playback(snd_pcm_t **handle, unsigned int *play_freq, snd_pcm_uframes_t *play_period_size,
+void init_playback(snd_pcm_t **handle, unsigned int play_freq, snd_pcm_uframes_t *play_period_size,
                    snd_pcm_uframes_t *play_buffer_size, unsigned int number_of_channels,
                    std::string playback_device_name);
 

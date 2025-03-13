@@ -5,12 +5,12 @@
 #include <cstdint> // Include this for uint8_t
 
 struct Gains {
-    float attention = 0.50f / 100.0f;
-    float meditation = -0.1f / 100.0f;
-    float heartrate = 0.3f / 180.0f;
-    float blood_oxygen = 0.125f / 100.0f;
-    float rms = 0.75f / 80.0f;
-    float new_mix_influence = 0.2f;
+    float attention = 0.50f;
+    float meditation = -0.1f;
+    float heartrate = 0.3f;
+    float blood_oxygen = 0.125f;
+    float rms = 0.75f;
+    float new_mix_influence = 0.002f;
 };
 
 struct Offsets {

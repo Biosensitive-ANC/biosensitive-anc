@@ -99,8 +99,8 @@ void EEGSerial::processEEGData() {
                 attention = new_attention;
                 meditation = new_meditation;
 
-                /*std::cout << "[EEG Thread Update] Attention: " << (int)attention
-                    << ", Meditation: " << (int)meditation << std::endl;*/
+                std::cout << "[EEG Thread Update] Attention: " << (int)attention
+                    << ", Meditation: " << (int)meditation << std::endl;
             }
         }
         else {
@@ -121,9 +121,9 @@ void EEGSerial::stopListening() {
     }
 }
 
-void EEGSerial::getData(uint8_t& out_attention, uint8_t& out_meditation)
+void EEGSerial::getData(uint8_t* out_attention, uint8_t* out_meditation)
 {
 	std::lock_guard<std::mutex> lock(dataMutex);
-	out_attention = attention;
-	out_meditation = meditation;
+	*out_attention = attention;
+	*out_meditation = meditation;
 }

@@ -19,24 +19,26 @@
 
 
 // Compute RMS value of the captured audio buffer
-float computeRMS(const int16_t* buffer, int size) {
+float computeRMS(const fixed_sample_type* buffer, int size) {
     static float average;
     const float K = 0.9f;
     float sum = 0.0f;
 
     for (int i = 0; i < size; i++) {
-        sum += buffer[i] * buffer[i];  // Square each sample
+        sum += (float) buffer[i] * (float) buffer[i];  // Square each sample
     }
+
+    sum /= 100000000.f;
 
     average = K * average + ((1-K) * sum/size);
     return std::log10(std::sqrt(average)) * 20;
 }
 
 // Pre-generate white noise samples
-void generateWhiteNoise(int16_t* buffer, int size, float mixLevel) {
+void generateWhiteNoise(fixed_sample_type* buffer, int size, float mixLevel) {
     for (int i = 0; i < size; i++) {
-        int32_t sample = ((std::rand() % 65536) - 32768) * mixLevel;
-        buffer[i] = std::max(std::min(sample, (int32_t)INT16_MAX), (int32_t)INT16_MIN);
+        fixed_sample_type sample = ((std::rand() % std::numeric_limits<fixed_sample_type>::max()) - (std::numeric_limits<fixed_sample_type>::max() >> 1)) * mixLevel;
+        buffer[i] = std::max(std::min(sample, std::numeric_limits<fixed_sample_type>::max()), std::numeric_limits<fixed_sample_type>::min());
     }
 }
 
@@ -54,12 +56,12 @@ void sensorDisplayThread(SharedData* shared, EEGSerial* eeg, RecUart* recUart) {
         float spo2;
         
         // Read sensor data
-        eeg->getData(attention, meditation);
-        recUart->getData(bpm, spo2);
-        
+        eeg->getData(&attention, &meditation);
+        recUart->getData(&bpm, &spo2);
+
         // Update shared data with mutex protection
         {
-            std::lock_guard<std::mutex> lock(shared->dataMutex);
+            // std::lock_guard<std::mutex> lock(shared->dataMutex);
             shared->attention = attention;
             shared->meditation = meditation;
             shared->bpm = bpm;
@@ -75,6 +77,7 @@ void sensorDisplayThread(SharedData* shared, EEGSerial* eeg, RecUart* recUart) {
         // Sleep to avoid excessive OLED updates
         std::this_thread::sleep_for(std::chrono::milliseconds(OLED_UPDATE_MS));
     }
+    std::cout << "ENDED OLED AAAAAAA" << std::endl;
 }
 
 void audioThread(SharedData* shared, AncMixing* mixer) {
@@ -103,14 +106,19 @@ void audioThread(SharedData* shared, AncMixing* mixer) {
             playback(play_handle, playback_buffer.data(), FRAMES_PER_PERIOD);
         });
 
+        // std::cout << "Buf " << capture_buffer[0] << std::endl;
+        // std::cout << "Proc Buf " << process_buffer[0] << std::endl;
+        // std::cout << "Play Buf " << playback_buffer[0] << std::endl;
         shared->rms = computeRMS(capture_buffer.data(), BUFFER_SAMPLE_SIZE);
+
+        float mix = mixer->update(shared->attention, shared->meditation, shared->bpm, shared->spo2, shared->rms);
         
         #ifdef WHITE_NOISE_IMPLEMENTATION
-        generateWhiteNoise(process_buffer.data(), BUFFER_SAMPLE_SIZE, shared->mix_level); // idk if the mix level will update properly
+        generateWhiteNoise(process_buffer.data(), BUFFER_SAMPLE_SIZE, mix); // idk if the mix level will update properly
         #else
         const fixed_sample_type multiplier = 8;
-        const MAXVAL = std::numeric_limits<fixed_sample_type>::max() / 8
-        const MINVAL = std::numeric_limits<fixed_sample_type>::min() / 8
+        const fixed_sample_type MAXVAL = std::numeric_limits<fixed_sample_type>::max() / 8;
+        const fixed_sample_type MINVAL = std::numeric_limits<fixed_sample_type>::min() / 8;
         std::transform(process_buffer.begin(), process_buffer.end(), process_buffer.begin(),
                 [multiplier](fixed_sample_type& val) { 
                     if(val > MAXVAL)
@@ -126,8 +134,8 @@ void audioThread(SharedData* shared, AncMixing* mixer) {
         playback_thread.join();
 
         // Exchange data between buffers (must be done after all threads complete)
-        std::copy(capture_buffer.begin(), capture_buffer.end(), process_buffer.begin());
         std::copy(process_buffer.begin(), process_buffer.end(), playback_buffer.begin());
+        std::copy(capture_buffer.begin(), capture_buffer.end(), process_buffer.begin());
     }
     
     snd_pcm_drain(play_handle);

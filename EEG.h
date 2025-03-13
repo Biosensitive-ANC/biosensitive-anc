@@ -32,7 +32,7 @@ public:
     void processEEGData();
     void startListening();  // Start the receiving thread
     void stopListening();   // Stop the receiving thread
-    void getData(uint8_t& out_attention, uint8_t& out_meditation);
+    void getData(uint8_t* out_attention, uint8_t* out_meditation);
 };
 
 #endif // EEG_H

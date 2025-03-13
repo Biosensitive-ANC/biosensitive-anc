@@ -15,7 +15,7 @@ public:
     ~RecUart();
 
     // Get heart rate and SpO2 data (thread-safe)
-    void getData(uint8_t& bpm, float& spo2);
+    void getData(uint8_t* bpm, float* spo2);
 
 private:
     // Serial port file descriptor
